@@ -3,7 +3,7 @@ import math
 import pandas as pd
 from collections import namedtuple
 
-Fact = namedtuple("Fact", "fact_id, question, answer")
+Fact = namedtuple("Fact", "fact_id, question, answer, category")
 Response = namedtuple("Response", "fact, start_time, rt, correct")
 Encounter = namedtuple("Encounter", "activation, time, reaction_time, decay")
 
@@ -13,7 +13,8 @@ class SpacingModel(object):
     # Model constants
     LOOKAHEAD_TIME = 15000
     FORGET_THRESHOLD = -0.8
-    DEFAULT_ALPHA = 0.3
+#    DEFAULT_ALPHA = 0.3
+    DEFAULT_ALPHA = {"animal": 0.25, "object": 0.4, "other": 0.35}
     C = 0.25
     F = 1.0
 
@@ -82,12 +83,12 @@ class SpacingModel(object):
         encounters = []
 
         responses_for_fact = [r for r in self.responses if r.fact.fact_id == fact.fact_id and r.start_time < time]
-        alpha = self.DEFAULT_ALPHA
+        alpha = self.DEFAULT_ALPHA[fact.category]#self.DEFAULT_ALPHA
 
         # Calculate the activation by running through the sequence of previous responses
         for response in responses_for_fact:
             activation = self.calculate_activation_from_encounters(encounters, response.start_time)
-            encounters.append(Encounter(activation, response.start_time, self.normalise_reaction_time(response), self.DEFAULT_ALPHA))
+            encounters.append(Encounter(activation, response.start_time, self.normalise_reaction_time(response),  self.DEFAULT_ALPHA[fact.category]))
             alpha = self.estimate_alpha(encounters, activation, response, alpha)
 
             # Update decay estimates of previous encounters
@@ -105,12 +106,12 @@ class SpacingModel(object):
         encounters = []
 
         responses_for_fact = [r for r in self.responses if r.fact.fact_id == fact.fact_id and r.start_time < time]
-        alpha = self.DEFAULT_ALPHA
+        alpha =  self.DEFAULT_ALPHA[fact.category]
 
         # Calculate the activation by running through the sequence of previous responses
         for response in responses_for_fact:
             activation = self.calculate_activation_from_encounters(encounters, response.start_time)
-            encounters.append(Encounter(activation, response.start_time, self.normalise_reaction_time(response), self.DEFAULT_ALPHA))
+            encounters.append(Encounter(activation, response.start_time, self.normalise_reaction_time(response),  self.DEFAULT_ALPHA[fact.category]))
             alpha = self.estimate_alpha(encounters, activation, response, alpha)
 
             # Update decay estimates of previous encounters
@@ -133,7 +134,7 @@ class SpacingModel(object):
         Estimate the rate of forgetting parameter (alpha) for an item.
         """
         if len(encounters) < 3:
-            return(self.DEFAULT_ALPHA)
+            return(self.DEFAULT_ALPHA[response.fact.category])
 
         a_fit = previous_alpha
         reading_time = self.get_reading_time(response.fact.question)
@@ -238,7 +239,7 @@ class SpacingModel(object):
 
 
     def export_data(self, path = None):
-        # type: (str) -> DataFrame
+        # type: (str) -> pd.DataFrame
         """
         Save the response data to the specified csv file, and return a copy of the pandas DataFrame.
         If no path is specified, return a CSV-formatted copy of the data instead.
