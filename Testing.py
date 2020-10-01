@@ -19,3 +19,18 @@ facts = [Fact(1, "hello", "bonjour", "other"),
 
 for fact in facts:
 	m.add_fact(fact)
+#%%
+print(m.facts)
+#%%
+def estimate_category_alpha(fact):
+     #facts = pd.DataFrame(m.facts)
+     #facts_category = facts[facts["category"] == category]
+     
+     facts_category = [f for f in m.facts if f.category == fact.category]
+     time = float(np.inf)
+     x = np.mean([m.get_rate_of_forgetting(time, f) for f in facts_category])
+     
+     return(x)
+
+ex_fact = m.facts[1]     
+print(estimate_category_alpha(ex_fact))        

@@ -2,6 +2,7 @@ from __future__ import division
 import math
 import pandas as pd
 from collections import namedtuple
+import numpy as np
 
 Fact = namedtuple("Fact", "fact_id, question, answer, category")
 Response = namedtuple("Response", "fact, start_time, rt, correct")
@@ -95,7 +96,30 @@ class SpacingModel(object):
             encounters = [encounter._replace(decay = self.calculate_decay(encounter.activation, alpha)) for encounter in encounters]
 
         return(alpha)
+    
+###############################################################################  
+# neu 
+    def get_individual_rate_of_forgetting(self, time, fact):
+        # type: (int, Fact) -> float
+        """
+        Return the estimated rate of forgetting of the fact at the specified time
+        """
+        encounters = []
 
+        responses_for_fact = [r for r in self.responses if r.fact.fact_id == fact.fact_id and r.start_time < time]
+        alpha = self.DEFAULT_ALPHA[fact.category]#self.DEFAULT_ALPHA
+
+        # Calculate the activation by running through the sequence of previous responses
+        for response in responses_for_fact:
+            activation = self.calculate_activation_from_encounters(encounters, response.start_time)
+            encounters.append(Encounter(activation, response.start_time, self.normalise_reaction_time(response),  self.DEFAULT_ALPHA[fact.category]))
+            alpha = self.estimate_individual_alpha(encounters, activation, response, alpha)
+
+            # Update decay estimates of previous encounters
+            encounters = [encounter._replace(decay = self.calculate_decay(encounter.activation, alpha)) for encounter in encounters]
+
+        return(alpha)
+###############################################################################
 
     def calculate_activation(self, time, fact):
         # type: (int, Fact) -> float
@@ -126,12 +150,12 @@ class SpacingModel(object):
         Calculate activation-dependent decay
         """
         return self.C * math.exp(activation) + alpha
-
-
-    def estimate_alpha(self, encounters, activation, response, previous_alpha):
+    
+###############################################################################
+    def estimate_individual_alpha(self, encounters, activation, response, previous_alpha):
         # type: ([Encounter], float, Response, float) -> float
         """
-        Estimate the rate of forgetting parameter (alpha) for an item.
+        Estimate the indivual rate of forgetting parameter (alpha) for an item.
         """
         if len(encounters) < 3:
             return(self.DEFAULT_ALPHA[response.fact.category])
@@ -170,10 +194,48 @@ class SpacingModel(object):
                 a1 = ac
             else:
                 a0 = ac
-        
+     
         # The new alpha estimate is the average value in the remaining bracket
         return((a0 + a1) / 2)
+        
+###############################################################################
+# changes  
 
+    def estimate_alpha(self, encounters, activation, response, previous_alpha):
+        # type: ([Encounter], float, Response, float) -> float
+        """
+        Estimate the rate of forgetting parameter (alpha) for an item.
+        """     
+        
+        alpha_individual = self.estimate_individual_alpha(encounters, activation, response, previous_alpha)
+        
+        alpha_category = self.estimate_category_alpha(response)
+        
+        return(self.weight_alpha(alpha_individual, alpha_category))
+    
+
+###############################################################################
+# calculating category-specific alpha
+   
+    def estimate_category_alpha(self, response):#fact
+        """
+        Calculating category-specific alpha as mean of last calculated alpha of each word in each category
+        """
+        facts_category = [f for f in self.facts if f.category == response.fact.category]
+        time = float(response.start_time)
+        averaged_alpha = np.mean([self.get_individual_rate_of_forgetting(time, f) for f in facts_category])
+        
+        return(averaged_alpha)
+    
+###############################################################################
+
+    def weight_alpha(self, alpha_individual, alpha_category, weight_individual = 0.5, weight_category = 0.5):
+        """
+        Weight individual and category-specific alpha for every step
+        """
+        return(alpha_individual * weight_individual + alpha_category * weight_category)
+    
+###############################################################################
 
     def calculate_activation_from_encounters(self, encounters, current_time):
         # type: ([Encounter], int) -> float
@@ -245,15 +307,21 @@ class SpacingModel(object):
         If no path is specified, return a CSV-formatted copy of the data instead.
         """
 
-        def calc_rof(row):
+        def calc_rof_adjusted(row):
             return(self.get_rate_of_forgetting(row["start_time"] + 1, row["fact"]))
+        
+        def calc_rof_individual(row):
+            return(self.get_individual_rate_of_forgetting(row["start_time"] + 1, row["fact"]))
 
         dat_resp = pd.DataFrame(self.responses)
         dat_facts = pd.DataFrame([r.fact for r in self.responses])
         dat = pd.concat([dat_resp, dat_facts], axis = 1)
 
         # Add column for rate of forgetting estimate after each observation
-        dat["alpha"] = dat.apply(calc_rof, axis = 1)
+        
+        # Displaying adjusted and individual alpha per timestep
+        dat["True alpha"] = dat.apply(calc_rof_individual, axis = 1)
+        dat["alpha backward-adjusted"] = dat.apply(calc_rof_adjusted, axis = 1)
         dat.drop(columns = "fact", inplace = True)
 
         # Add trial number column
